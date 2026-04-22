@@ -1,10 +1,13 @@
 #include "DHT.h"
 
 // -------------------- PIN DEFINITIONS --------------------
-#define SOIL_PIN 34     // ADC pin for soil moisture
-#define FLOW_PIN 21     // Pulse pin for water flow
-#define TDS_PIN 35      // ADC pin for TDS sensor
-#define DHT_PIN 22      // Digital pin for DHT11
+#define SOIL_PIN 34     
+#define FLOW_PIN 21     
+#define TDS_PIN 35      
+#define DHT_PIN 22      
+
+#define PH_PIN 32        // NEW
+#define TURBIDITY_PIN 33 // NEW
 
 #define DHTTYPE DHT11
 DHT dht(DHT_PIN, DHTTYPE);
@@ -25,24 +28,23 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // Initialize pins
   pinMode(SOIL_PIN, INPUT);
   pinMode(TDS_PIN, INPUT);
   pinMode(FLOW_PIN, INPUT_PULLUP);
+  pinMode(PH_PIN, INPUT);
+  pinMode(TURBIDITY_PIN, INPUT);
 
-  // Attach interrupt for water flow
   attachInterrupt(digitalPinToInterrupt(FLOW_PIN), flowISR, RISING);
 
-  // Initialize DHT11
   dht.begin();
 
-  Serial.println("🌱 Vertical Farming – Soil + Flow + TDS + Temp/Humidity (5s Update)");
+  Serial.println("🌱 Vertical Farming – FULL SENSOR SYSTEM (5s Update)");
 }
 
 // -------------------- LOOP --------------------
 void loop() {
 
-  if (millis() - lastPrintTime >= 5000) {  // 5-second interval
+  if (millis() - lastPrintTime >= 5000) {
 
     // ----- FLOW SENSOR -----
     noInterrupts();
@@ -50,35 +52,51 @@ void loop() {
     flowPulses = 0;
     interrupts();
 
-    flowRate = pulses / 7.5 / 5.0;              // L/min over 5 seconds
-    float litersUsed = flowRate * (5.0 / 60.0); // L over 5 seconds
+    flowRate = pulses / 7.5 / 5.0;
+    float litersUsed = flowRate * (5.0 / 60.0);
     totalLiters += litersUsed;
 
-    // ----- SOIL MOISTURE -----
+    // ----- SOIL -----
     int soilValue = analogRead(SOIL_PIN);
 
-    // ----- TDS SENSOR -----
+    // ----- TDS -----
     int tdsRaw = analogRead(TDS_PIN);
-    float voltage = tdsRaw * (3.3 / 4095.0);
-    float tdsValue = (133.42 * voltage * voltage * voltage
-                      - 255.86 * voltage * voltage
-                      + 857.39 * voltage) * 0.5; // ppm
+    float tdsVoltage = tdsRaw * (3.3 / 4095.0);
+    float tdsValue = (133.42 * tdsVoltage * tdsVoltage * tdsVoltage
+                      - 255.86 * tdsVoltage * tdsVoltage
+                      + 857.39 * tdsVoltage) * 0.5;
+
+    // ----- pH SENSOR -----
+    int phRaw = analogRead(PH_PIN);
+    float phVoltage = phRaw * (3.3 / 4095.0);
+
+    // Approximate formula (needs calibration)
+    float pHValue = 7 + ((2.5 - phVoltage) / 0.18);
+
+    // ----- TURBIDITY SENSOR -----
+    int turbRaw = analogRead(TURBIDITY_PIN);
+    float turbVoltage = turbRaw * (3.3 / 4095.0);
+
+    // Approximate NTU conversion
+    float turbidity = -1120.4 * turbVoltage * turbVoltage 
+                      + 5742.3 * turbVoltage 
+                      - 4352.9;
 
     // ----- DHT11 -----
     float tempC = dht.readTemperature();
     float hum = dht.readHumidity();
 
-    // ----- SERIAL OUTPUT -----
+    // -------------------- OUTPUT --------------------
     Serial.println("========== 5 SECOND DATA ==========");
 
-    // Soil moisture
+    // Soil
     Serial.print("🌱 Soil Moisture: ");
     Serial.println(soilValue);
     if (soilValue > 3000) Serial.println("Status: DRY");
     else if (soilValue > 1800) Serial.println("Status: MOIST");
     else Serial.println("Status: WET");
 
-    // Water flow
+    // Flow
     Serial.print("💧 Flow Rate: ");
     Serial.print(flowRate, 2);
     Serial.println(" L/min");
@@ -88,13 +106,22 @@ void loop() {
     Serial.println(" L");
 
     // TDS
-    Serial.print("⚡ TDS Value: ");
+    Serial.print("⚡ TDS: ");
     Serial.print(tdsValue, 0);
     Serial.println(" ppm");
 
-    // DHT11
+    // pH
+    Serial.print("🧪 pH Value: ");
+    Serial.println(pHValue, 2);
+
+    // Turbidity
+    Serial.print("🌫️ Turbidity: ");
+    Serial.print(turbidity, 0);
+    Serial.println(" NTU");
+
+    // DHT
     if (isnan(tempC) || isnan(hum)) {
-      Serial.println("⚠️ Failed to read DHT11!");
+      Serial.println("⚠️ DHT11 Error!");
     } else {
       Serial.print("🌡️ Temp: ");
       Serial.print(tempC);
